@@ -1,0 +1,45 @@
+services:
+  # The Video Generator Service (Backend)
+  - type: web
+    name: loanie-video-engine
+    runtime: docker
+    rootCommand: cd video-generator
+    repo: https://github.com/abenezer101/Loanie
+    plan: free
+    region: oregon
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: REMOTION_CONCURRENCY
+        value: 1
+    # Health check
+    healthCheckPath: /
+    autoDeploy: true
+
+  # The Frontend (Next.js) - Optional if they want to deploy it here too
+  - type: web
+    name: loanie-web
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_VIDEO_GENERATOR_URL
+        fromService:
+          type: web
+          name: loanie-video-engine
+          property: url

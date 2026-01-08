@@ -1,0 +1,5 @@
+node_modules
+.env
+public/videos
+public/audio
+remotion-build

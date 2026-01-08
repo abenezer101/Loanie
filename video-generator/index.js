@@ -20,6 +20,11 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Health Check Endpoint
+app.get('/', (req, res) => {
+    res.send('Video Generator Service is running');
+});
+
 if (!supabaseUrl || !supabaseKey) {
     console.error('Missing Supabase environment variables');
     process.exit(1);
@@ -213,6 +218,10 @@ app.post('/generate-video', async (req, res) => {
 
             console.log(`🚀 [${videoId}] Calling renderMedia...`);
 
+            // Limit concurrency based on environment (Free tier = 1)
+            const concurrency = process.env.REMOTION_CONCURRENCY ? parseInt(process.env.REMOTION_CONCURRENCY) : 4;
+            console.log(`⚙️ [${videoId}] Concurrency set to: ${concurrency}`);
+
             let lastUpdate = Date.now();
             await renderMedia({
                 composition,
@@ -220,6 +229,7 @@ app.post('/generate-video', async (req, res) => {
                 codec: 'h264',
                 outputLocation,
                 inputProps: { manifest: transformedManifest, analysis },
+                concurrency,
                 chromiumOptions: {
                     args: ['--no-sandbox', '--disable-setuid-sandbox']
                 },

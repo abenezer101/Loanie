@@ -1,4 +1,4 @@
-# 🏦 Loanie  
+# ![Loanie logo](public/lonie-logo.ico) [Loanie](https://loanie.netlify.app)  
 **Loan Intelligence, Explained Clearly**
 
 ![Status](https://img.shields.io/badge/status-hackathon--prototype-blue)
@@ -209,7 +209,7 @@ Licensed under the Apache License, Version 2.0.
 
 ## 👥 Team
 
-**Abenezer Abera Mergia**  
+**Abenezer Mergia**  
 Founder & Builder  
 - Full-stack engineer focused on AI systems and developer tooling  
 - Designed Loanie’s deterministic video compiler architecture  

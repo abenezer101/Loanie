@@ -29,8 +29,12 @@ export async function POST(request: Request) {
         const manifestId = manifestData.id;
 
         // 3. Call External Video Generator Service
-        console.log('🚀 Calling video generator service...');
-        const generatorResponse = await fetch(process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'http://localhost:3001/generate-video', {
+        // Ensure correct endpoint construction whether env var has trailing slash or not
+        const baseUrl = (process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'https://lonie-video-generation-engine.onrender.com').replace(/\/$/, '');
+        const generatorUrl = `${baseUrl}/generate-video`;
+
+        console.log(`🚀 Calling video generator service: ${generatorUrl}`);
+        const generatorResponse = await fetch(generatorUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ manifest, analysis, manifest_id: manifestId }),

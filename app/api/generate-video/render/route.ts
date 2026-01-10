@@ -30,8 +30,9 @@ export async function POST(request: Request) {
 
         // 3. Call External Video Generator Service
         // Ensure correct endpoint construction whether env var has trailing slash or not
-        const baseUrl = (process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'https://lonie-video-generation-engine-180795740602.europe-west1.run.app').replace(/\/$/, '');
-        const generatorUrl = `${baseUrl}/generate-video`;
+        // Ensure correct endpoint construction: only append /generate-video if not already present
+        const rawUrl = (process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'https://lonie-video-generation-engine-180795740602.europe-west1.run.app').replace(/\/$/, '');
+        const generatorUrl = rawUrl.endsWith('/generate-video') ? rawUrl : `${rawUrl}/generate-video`;
 
         console.log(`🚀 Calling video generator service: ${generatorUrl}`);
         const generatorResponse = await fetch(generatorUrl, {

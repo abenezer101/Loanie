@@ -16,10 +16,12 @@ interface VideoPreviewProps {
   videoUrl: string | null
   isReady: boolean
   isProcessing?: boolean
+  realtimeProgress?: number
+  progressLabel?: string
   onReset: () => void
 }
 
-export function VideoPreview({ manifest, analysis, videoUrl, isReady, isProcessing, onReset }: VideoPreviewProps) {
+export function VideoPreview({ manifest, analysis, videoUrl, isReady, isProcessing, realtimeProgress = 0, progressLabel = "", onReset }: VideoPreviewProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0)
@@ -207,12 +209,42 @@ export function VideoPreview({ manifest, analysis, videoUrl, isReady, isProcessi
             {/* Video Display */}
             <div className="aspect-video bg-background rounded-lg border border-border overflow-hidden relative">
               {isProcessing ? (
-                <div className="absolute inset-0 p-4 space-y-4">
-                  <Skeleton className="w-full h-full rounded-lg" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3">
-                    <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                    <p className="text-sm font-medium text-primary animate-pulse">Generating Briefing...</p>
-                    <p className="text-[10px] text-muted-foreground">Orchestrating AI & Video Rendering</p>
+                <div className="absolute inset-0 bg-gradient-to-br from-background via-background/95 to-background">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    {/* Circular Progress Indicator */}
+                    <div className="relative w-48 h-48">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle
+                          cx="96"
+                          cy="96"
+                          r="80"
+                          stroke="currentColor"
+                          strokeWidth="12"
+                          fill="none"
+                          className="text-muted opacity-20"
+                        />
+                        <circle
+                          cx="96"
+                          cy="96"
+                          r="80"
+                          stroke="currentColor"
+                          strokeWidth="12"
+                          fill="none"
+                          strokeDasharray={`${2 * Math.PI * 80}`}
+                          strokeDashoffset={`${2 * Math.PI * 80 * (1 - (realtimeProgress || 0) / 100)}`}
+                          className="text-primary transition-all duration-500 ease-out"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-5xl font-black text-primary tracking-tighter">
+                          {Math.round(realtimeProgress || 0)}%
+                        </span>
+                        <span className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1 font-bold">
+                          Rendering
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : !manifest ? (

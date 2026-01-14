@@ -30,17 +30,13 @@ interface SceneProps {
   analysis: LoanAnalysis;
 }
 
-// Safe area boundaries (maintain 5% padding on all sides)
-const SAFE_AREA_PADDING = {
-  top: 54,    // 5% of 1080
-  bottom: 54,
-  left: 96,   // 5% of 1920
-  right: 96
-};
-
 export const Scene: React.FC<SceneProps> = ({ scene, analysis }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
+
+  // Dynamic safe area boundaries (maintain 5% padding on all sides)
+  const paddingY = height * 0.05;
+  const paddingX = width * 0.05;
   
   // Audio Debug
   if (frame === 0) {
@@ -85,8 +81,8 @@ export const Scene: React.FC<SceneProps> = ({ scene, analysis }) => {
   });
 
   // Calculate safe content area
-  const contentWidth = width - SAFE_AREA_PADDING.left - SAFE_AREA_PADDING.right;
-  const contentHeight = height - SAFE_AREA_PADDING.top - SAFE_AREA_PADDING.bottom;
+  const contentWidth = width - paddingX * 2;
+  const contentHeight = height - paddingY * 2;
   const maxContentWidth = Math.min(contentWidth, 1600); // Maximum content width
 
   const renderComponent = (component: VisualComponent, index: number) => {
@@ -728,10 +724,10 @@ export const Scene: React.FC<SceneProps> = ({ scene, analysis }) => {
       <div 
         style={{ 
           position: 'absolute',
-          top: SAFE_AREA_PADDING.top,
-          left: SAFE_AREA_PADDING.left,
-          right: SAFE_AREA_PADDING.right,
-          bottom: SAFE_AREA_PADDING.bottom,
+          top: paddingY,
+          left: paddingX,
+          right: paddingX,
+          bottom: paddingY,
           display: 'flex', 
           flexDirection: 'column',
           alignItems: 'center',
@@ -810,9 +806,9 @@ export const Scene: React.FC<SceneProps> = ({ scene, analysis }) => {
         <div 
           style={{ 
             position: 'absolute',
-            bottom: SAFE_AREA_PADDING.bottom + 20,
-            left: SAFE_AREA_PADDING.left + 40,
-            right: SAFE_AREA_PADDING.right + 40,
+            bottom: paddingY + 20,
+            left: paddingX + 40,
+            right: paddingX + 40,
             borderRadius: '16px',
             padding: '24px 40px',
             borderTop: '2px solid rgba(99, 102, 241, 0.4)',
@@ -845,8 +841,8 @@ export const Scene: React.FC<SceneProps> = ({ scene, analysis }) => {
       <div 
         style={{ 
           position: 'absolute', 
-          bottom: SAFE_AREA_PADDING.bottom - 30,
-          right: SAFE_AREA_PADDING.right,
+          bottom: paddingY - 30,
+          right: paddingX,
           display: 'flex', 
           alignItems: 'center',
           gap: '12px',

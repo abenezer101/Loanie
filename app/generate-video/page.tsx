@@ -209,6 +209,8 @@ export default function GenerateVideoPage() {
       // Step 3: Render final video through the generator service
       console.log("🎬 Initiating final video render...")
       setStep("rendering")
+      setRealtimeProgress(0)
+      setProgressLabel("Starting render...")
       const renderResponse = await fetch("/api/generate-video/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -227,40 +229,42 @@ export default function GenerateVideoPage() {
       if (initialStatus === "completed" && initialVideoUrl) {
         setVideoUrl(initialVideoUrl)
         setStep("complete")
+        setRealtimeProgress(100)
       } else {
-        // Subscribe to Supabase for real-time progress
-        const { supabase } = await import("@/lib/supabase")
-        
-        supabase
-          .channel(`video-${videoId}`)
-          .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'videos', 
-            filter: `id=eq.${videoId}` 
-          }, (payload: any) => {
-            const { progress, progress_label, status, video_url } = payload.new
-            console.log(`📡 Realtime update [${videoId}]:`, { progress, status })
-            
-            if (progress !== undefined) setRealtimeProgress(progress)
-            if (progress_label) setProgressLabel(progress_label)
-            
-            if (status === 'completed') {
-              setVideoUrl(video_url)
-              setStep("complete")
-            } else if (status === 'failed') {
-              setError("Video rendering failed. Please try again.")
-              setStep("error")
-            }
-          })
-          .subscribe()
+        // Use the consolidated polling logic
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResponse = await fetch(`/api/video-status?id=${videoId}`)
+            if (statusResponse.ok) {
+              const data = await statusResponse.json()
+              const { status, videoUrl: finalUrl, progress, progressLabel } = data
+              
+              if (progress !== undefined) setRealtimeProgress(progress)
+              if (progressLabel) setProgressLabel(progressLabel)
 
-        // Fallback or long timeout just in case
+              if (status === "completed" && finalUrl) {
+                setVideoUrl(finalUrl)
+                setStep("complete")
+                setRealtimeProgress(100)
+                clearInterval(pollInterval)
+              } else if (status === "failed") {
+                setError("Video rendering failed")
+                setStep("error")
+                clearInterval(pollInterval)
+              }
+            }
+          } catch (e) {
+            console.error("Polling error:", e)
+          }
+        }, 2000)
+
+        // Cleanup on timeout
         setTimeout(() => {
+          clearInterval(pollInterval)
           if (step === "rendering") {
             setError("Rendering is taking longer than expected. Please check the History page in a few minutes.")
           }
-        }, 300000) // 5 minutes
+        }, 600000) // 10 minutes
       }
 
       console.log("✨ Briefing generation initiated!")
@@ -274,6 +278,8 @@ export default function GenerateVideoPage() {
   const handleTestGenerate = async () => {
     setError(null)
     setStep("rendering")
+    setRealtimeProgress(0)
+    setProgressLabel("Initiating test...")
     
     try {
       console.log("🧪 Starting TEST video generation process...")
@@ -313,16 +319,23 @@ export default function GenerateVideoPage() {
       if (initialStatus === "completed" && initialVideoUrl) {
         setVideoUrl(initialVideoUrl)
         setStep("complete")
+        setRealtimeProgress(100)
       } else {
-        // Poll for test video
+        // Poll for test video with full progress support
         const pollInterval = setInterval(async () => {
           try {
             const statusResponse = await fetch(`/api/video-status?id=${videoId}`)
             if (statusResponse.ok) {
-              const { status, videoUrl: finalUrl } = await statusResponse.json()
+              const data = await statusResponse.json()
+              const { status, videoUrl: finalUrl, progress, progressLabel } = data
+              
+              if (progress !== undefined) setRealtimeProgress(progress)
+              if (progressLabel) setProgressLabel(progressLabel)
+
               if (status === "completed" && finalUrl) {
                 setVideoUrl(finalUrl)
                 setStep("complete")
+                setRealtimeProgress(100)
                 clearInterval(pollInterval)
               } else if (status === "failed") {
                 setError("Video rendering failed")
@@ -330,8 +343,10 @@ export default function GenerateVideoPage() {
                 clearInterval(pollInterval)
               }
             }
-          } catch (e) {}
-        }, 5000)
+          } catch (e) {
+            console.error("Test polling error:", e)
+          }
+        }, 2000)
       }
     } catch (err) {
       console.error("💥 TEST generation failure:", err)
@@ -458,6 +473,8 @@ export default function GenerateVideoPage() {
               videoUrl={videoUrl}
               isReady={step === "complete"} 
               isProcessing={step !== "idle" && step !== "complete" && step !== "error"}
+              realtimeProgress={realtimeProgress}
+              progressLabel={progressLabel}
               onReset={handleReset} 
             />
           </div>

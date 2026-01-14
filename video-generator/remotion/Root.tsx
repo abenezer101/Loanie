@@ -10,8 +10,8 @@ export const RemotionRoot: React.FC = () => {
         component={Main as any}
         durationInFrames={300} // This will be overridden by the renderer
         fps={30}
-        width={1920}
-        height={1080}
+        width={1280}
+        height={720}
         defaultProps={{
           manifest: null as any,
           analysis: null as any,

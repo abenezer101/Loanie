@@ -8,6 +8,7 @@ const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const { createClient: createDeepgramClient } = require('@deepgram/sdk');
 const { pipeline } = require('stream/promises');
+const os = require('os');
 require('dotenv').config();
 
 const deepgram = createDeepgramClient(process.env.DEEPGRAM_API_KEY);
@@ -44,6 +45,19 @@ const audioDir = path.join(__dirname, 'public', 'audio');
     }
 });
 
+// In-memory status tracking for immediate responsiveness
+const activeRenders = new Map();
+
+// Bundle cache to avoid rebundling on every request
+let bundleCache = null;
+async function getBundle() {
+    if (bundleCache) return bundleCache;
+    console.log("📦 Creating fresh bundle...");
+    const inputPath = path.resolve(__dirname, 'remotion', 'index.tsx');
+    bundleCache = await bundle(inputPath);
+    return bundleCache;
+}
+
 // Transform AI manifest format to Remotion expected format
 function transformManifest(aiManifest) {
     if (!aiManifest) return null;
@@ -55,7 +69,7 @@ function transformManifest(aiManifest) {
             loan_id: 'unknown',
             version: '1.0',
             theme: 'institutional-dark',
-            resolution: '1920x1080',
+            resolution: '1280x720', // Faster rendering than 1080p
             fps: 30
         },
         scenes: scenes.map((scene, idx) => {
@@ -88,6 +102,45 @@ function transformManifest(aiManifest) {
     };
 }
 
+// Status Endpoint
+app.get('/status/:videoId', async (req, res) => {
+    const { videoId } = req.params;
+    console.log(`🔍 Checking status for video: ${videoId}`);
+
+    // 1. Check in-memory first for high responsiveness
+    if (activeRenders.has(videoId)) {
+        console.log(`  - Found in memory:`, activeRenders.get(videoId));
+        return res.json(activeRenders.get(videoId));
+    }
+
+    // 2. Fallback to Supabase if not in memory (rendered by another instance or memory cleared)
+    try {
+        const { data, error } = await supabase
+            .from('videos')
+            .select('*')
+            .eq('id', videoId)
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!data) {
+            return res.status(404).json({ error: 'Video not found' });
+        }
+
+        const statusResponse = {
+            status: data.status,
+            progress: data.progress || 0,
+            progressLabel: data.progress_label || '',
+            videoUrl: data.video_url || null
+        };
+
+        console.log(`  - Found in DB:`, statusResponse);
+        return res.json(statusResponse);
+    } catch (err) {
+        console.error(`❌ Error fetching status from DB:`, err);
+        return res.status(500).json({ error: 'Failed to fetch status' });
+    }
+});
+
 app.post('/generate-video', async (req, res) => {
     const { manifest, analysis, manifest_id } = req.body;
 
@@ -107,6 +160,14 @@ app.post('/generate-video', async (req, res) => {
 
     // Return early to prevent HTTP timeout
     res.json({ videoId, status: 'processing' });
+
+    // Initial state in memory
+    activeRenders.set(videoId, {
+        status: 'processing',
+        progress: 0,
+        progressLabel: 'Starting render...',
+        videoUrl: null
+    });
 
     // Start background render
     (async () => {
@@ -134,41 +195,40 @@ app.post('/generate-video', async (req, res) => {
 
             console.log(`🎬 [${videoId}] Planning render: ${durationInFrames} frames (${totalDurationInSeconds}s) at ${fps}fps`);
 
-            // Update status in DB
+            // Update status in DB and memory
             if (manifest_id) {
+                const initialStatus = {
+                    id: videoId,
+                    manifest_id: manifest_id,
+                    status: 'processing',
+                    progress: 5,
+                    progress_label: 'Bundling project'
+                };
+
+                activeRenders.set(videoId, {
+                    ...activeRenders.get(videoId),
+                    progress: 5,
+                    progressLabel: 'Bundling project'
+                });
+
                 await supabase
                     .from('videos')
-                    .upsert([{
-                        id: videoId,
-                        manifest_id: manifest_id,
-                        status: 'processing',
-                        progress: 5,
-                        progress_label: 'Bundling project'
-                    }]);
+                    .upsert([initialStatus]);
             }
 
-            const inputPath = path.resolve(__dirname, 'remotion', 'index.tsx');
-            const bundled = await bundle(inputPath);
+            const bundled = await getBundle();
 
             // Step: Generate Narration Audio for each scene if missing
             console.log(`🔊 [${videoId}] Generating narration audio and uploading to Supabase...`);
 
             const totalScenes = transformedManifest.scenes.length;
-            for (let i = 0; i < totalScenes; i++) {
-                const scene = transformedManifest.scenes[i];
+            let audioCompleted = 0;
 
-                // Update progress for audio generation (5-30% range)
-                const audioProgress = Math.round((i / totalScenes) * 25) + 5;
-                await supabase
-                    .from('videos')
-                    .update({
-                        progress: audioProgress,
-                        progress_label: `Generating Audio (${i + 1}/${totalScenes})`
-                    })
-                    .eq('id', videoId);
+            console.log(`🔊 [${videoId}] Generating narration audio for ${totalScenes} scenes in parallel...`);
+
+            await Promise.all(transformedManifest.scenes.map(async (scene, i) => {
                 if (scene.narration && scene.narration.text && !scene.narration.audioUrl) {
                     try {
-                        console.log(`  - Generating audio for scene ${i}: "${scene.narration.text.substring(0, 30)}..."`);
                         const audioFileName = `${videoId}_scene_${i}.mp3`;
                         const audioPath = path.join(audioDir, audioFileName);
 
@@ -182,7 +242,6 @@ app.post('/generate-video', async (req, res) => {
                             const file = fs.createWriteStream(audioPath);
                             await pipeline(stream, file);
 
-                            // Upload to Supabase Storage
                             const audioBuffer = fs.readFileSync(audioPath);
                             const { error: uploadError } = await supabase.storage
                                 .from(BUCKET_NAME)
@@ -193,7 +252,6 @@ app.post('/generate-video', async (req, res) => {
 
                             if (uploadError) throw uploadError;
 
-                            // Get public URL
                             const { data: urlData } = supabase.storage
                                 .from(BUCKET_NAME)
                                 .getPublicUrl(audioFileName);
@@ -201,14 +259,28 @@ app.post('/generate-video', async (req, res) => {
                             scene.narration.audioUrl = urlData.publicUrl;
                             audioFiles.push(audioPath);
                             supabaseAudioPaths.push(audioFileName);
-
-                            console.log(`    ✅ Audio ready & uploaded: ${urlData.publicUrl}`);
                         }
                     } catch (audioErr) {
-                        console.error(`    ❌ Failed to generate/upload audio for scene ${i}:`, audioErr);
+                        console.error(`    ❌ Failed to generate audio for scene ${i}:`, audioErr);
                     }
                 }
-            }
+
+                // Track progress
+                audioCompleted++;
+                const audioProgress = Math.round((audioCompleted / totalScenes) * 25) + 5;
+                const label = `Generating Audio (${audioCompleted}/${totalScenes})`;
+
+                activeRenders.set(videoId, {
+                    ...activeRenders.get(videoId),
+                    progress: audioProgress,
+                    progressLabel: label
+                });
+
+                await supabase
+                    .from('videos')
+                    .update({ progress: audioProgress, progress_label: label })
+                    .eq('id', videoId);
+            }));
 
             const compositionId = 'LoanBriefing';
             const composition = await selectComposition({
@@ -221,9 +293,7 @@ app.post('/generate-video', async (req, res) => {
 
             console.log(`🚀 [${videoId}] Calling renderMedia...`);
 
-            // Limit concurrency based on environment (Free tier = 1)
-            const concurrency = process.env.REMOTION_CONCURRENCY ? parseInt(process.env.REMOTION_CONCURRENCY) : 1;
-            console.log(`⚙️ [${videoId}] Concurrency set to: ${concurrency}`);
+            console.log(`🎮 [${videoId}] GPU Acceleration enabled`);
 
             let lastUpdate = Date.now();
             await renderMedia({
@@ -232,27 +302,56 @@ app.post('/generate-video', async (req, res) => {
                 codec: 'h264',
                 outputLocation,
                 inputProps: { manifest: transformedManifest, analysis },
-                concurrency,
                 chromiumOptions: {
-                    args: ['--no-sandbox', '--disable-setuid-sandbox']
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-extensions',
+                        '--autoplay-policy=no-user-gesture-required',
+                        '--disable-gpu', // Use software rendering for stability on laptops
+                    ]
                 },
+                concurrency: process.env.RENDER_CONCURRENCY ? parseInt(process.env.RENDER_CONCURRENCY) : Math.min(os.cpus().length, 3),
                 onProgress: async ({ progress }) => {
                     // Update every 1000ms to avoid spamming Supabase
                     if (Date.now() - lastUpdate > 1000) {
                         const totalProgress = 30 + Math.round(progress * 60); // 30-90% range
+                        const label = `Rendering (${Math.round(progress * 100)}%)`;
+
+                        activeRenders.set(videoId, {
+                            ...activeRenders.get(videoId),
+                            progress: totalProgress,
+                            progressLabel: label
+                        });
+
+                        // 1. Update legacy videos table (optional/cleanup)
                         await supabase
                             .from('videos')
-                            .update({
-                                progress: totalProgress,
-                                progress_label: `Rendering (${Math.round(progress * 100)}%)`
-                            })
+                            .update({ progress: totalProgress, progress_label: label })
                             .eq('id', videoId);
+
+                        // 2. Update Primary Artifacts table
+                        if (manifest_id) {
+                            try {
+                                const { data: m } = await supabase.from('video_manifests').select('analysis_id').eq('id', manifest_id).single();
+                                if (m?.analysis_id) {
+                                    await supabase.from('artifacts').update({ video_status: label }).eq('analysis_id', m.analysis_id);
+                                }
+                            } catch (e) { }
+                        }
+
                         lastUpdate = Date.now();
                     }
                 }
             });
 
             console.log(`✅ [${videoId}] Render complete! Uploading video...`);
+            activeRenders.set(videoId, {
+                ...activeRenders.get(videoId),
+                progress: 95,
+                progressLabel: 'Uploading to storage'
+            });
             await supabase
                 .from('videos')
                 .update({ progress: 95, progress_label: 'Uploading to storage' })
@@ -289,27 +388,103 @@ app.post('/generate-video', async (req, res) => {
                 console.error(`⚠️ [${videoId}] Upload failed, using local URL:`, err);
             }
 
-            // Update DB with success
-            await supabase
+            // Update DB and memory with success
+            const finalStatus = {
+                video_url: videoUrl,
+                status: 'completed',
+                progress: 100,
+                progress_label: 'Finished',
+                isReady: true,
+                storage_metadata: { duration: totalDurationInSeconds, frames: durationInFrames }
+            };
+
+            activeRenders.set(videoId, {
+                status: 'completed',
+                progress: 100,
+                progressLabel: 'Finished',
+                videoUrl: videoUrl
+            });
+
+            console.log(`💾 [${videoId}] Updating database with final status...`);
+            const { error: updateError } = await supabase
                 .from('videos')
-                .update({
-                    video_url: videoUrl,
-                    status: 'completed',
-                    progress: 100,
-                    progress_label: 'Finished',
-                    isReady: true,
-                    storage_metadata: { duration: totalDurationInSeconds, frames: durationInFrames }
-                })
+                .update(finalStatus)
                 .eq('id', videoId);
+
+            if (updateError) {
+                console.error(`❌ [${videoId}] Failed to update database:`, updateError);
+                // Retry once
+                console.log(`🔄 [${videoId}] Retrying database update...`);
+                const { error: retryError } = await supabase
+                    .from('videos')
+                    .update(finalStatus)
+                    .eq('id', videoId);
+
+                if (retryError) {
+                    console.error(`❌ [${videoId}] Retry failed:`, retryError);
+                } else {
+                    console.log(`✅ [${videoId}] Database updated on retry`);
+                }
+            } else {
+                console.log(`✅ [${videoId}] Database updated successfully`);
+            }
 
             console.log(`✨ [${videoId}] Process finished successfully: ${videoUrl}`);
 
+            // Sync with artifacts table
+            if (manifest_id) {
+                try {
+                    // Find the manifest to get analysis_id
+                    const { data: manifestData } = await supabase
+                        .from('video_manifests')
+                        .select('analysis_id')
+                        .eq('id', manifest_id)
+                        .single();
+
+                    if (manifestData?.analysis_id) {
+                        await supabase
+                            .from('artifacts')
+                            .update({
+                                video_url: videoUrl,
+                                video_status: 'completed'
+                            })
+                            .eq('analysis_id', manifestData.analysis_id);
+                        console.log(`✅ [${videoId}] Artifact table synced`);
+                    }
+                } catch (syncErr) {
+                    console.error(`⚠️ [${videoId}] Failed to sync artifact:`, syncErr);
+                }
+            }
+
+
         } catch (error) {
             console.error(`💥 [${videoId}] Render failed:`, error);
+            activeRenders.set(videoId, {
+                ...activeRenders.get(videoId),
+                status: 'failed',
+                progressLabel: 'Render Failed'
+            });
             await supabase
                 .from('videos')
                 .update({ status: 'failed' })
                 .eq('id', videoId);
+
+            // Sync failure to artifacts table
+            if (manifest_id) {
+                try {
+                    const { data: manifestData } = await supabase
+                        .from('video_manifests')
+                        .select('analysis_id')
+                        .eq('id', manifest_id)
+                        .single();
+                    if (manifestData?.analysis_id) {
+                        await supabase
+                            .from('artifacts')
+                            .update({ video_status: 'failed' })
+                            .eq('analysis_id', manifestData.analysis_id);
+                    }
+                } catch (e) { }
+            }
 
         } finally {
             // Cleanup local and cloud files
@@ -330,6 +505,12 @@ app.post('/generate-video', async (req, res) => {
                     await supabase.storage.from(BUCKET_NAME).remove(supabaseAudioPaths);
                 } catch (err) { }
             }
+
+            // Remove from activeRenders after a short delay to allow final polling
+            setTimeout(() => {
+                activeRenders.delete(videoId);
+                console.log(`🧹 [${videoId}] Memory cache cleared`);
+            }, 30000); // 30 seconds
         }
     })();
 });

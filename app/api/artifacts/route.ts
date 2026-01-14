@@ -21,8 +21,8 @@ export async function GET() {
                 day: 'numeric',
                 year: 'numeric'
             }),
-            amount: art.amount !== '0'
-                ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(parseFloat(art.amount))
+            amount: (art.amount && art.amount !== '0')
+                ? (art.amount.includes('$') ? art.amount : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(parseFloat(art.amount)))
                 : "N/A",
             decision: art.decision?.toLowerCase() || "unknown",
             borrower: art.borrower,

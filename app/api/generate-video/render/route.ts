@@ -31,7 +31,7 @@ export async function POST(request: Request) {
         // 3. Call External Video Generator Service
         // Ensure correct endpoint construction whether env var has trailing slash or not
         // Ensure correct endpoint construction: only append /generate-video if not already present
-        const rawUrl = (process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'https://lonie-video-generation-engine-180795740602.europe-west1.run.app').replace(/\/$/, '');
+        const rawUrl = (process.env.NEXT_PUBLIC_VIDEO_GENERATOR_URL || 'http://localhost:3001').replace(/\/$/, '');
         const generatorUrl = rawUrl.endsWith('/generate-video') ? rawUrl : `${rawUrl}/generate-video`;
 
         console.log(`🚀 Calling video generator service: ${generatorUrl}`);
@@ -71,15 +71,15 @@ export async function POST(request: Request) {
                 short_id: analysisId.slice(0, 8).toUpperCase(),
                 title: (analysis?.loanOverview?.borrowerName || analysis?.loanOverview?.borrowerLegalName || 'Untitled') + ' - ' + (analysis?.loanOverview?.loanType || 'Loan Briefing'),
                 description: analysis?.loanOverview?.description || '',
-                borrower: analysis?.loanOverview?.borrowerLegalName || 'N/A',
-                amount: analysis?.loanOverview?.facilityAmount?.value?.toString() || '0',
-                decision: analysis?.creditRecommendation?.recommendation || 'unknown',
+                borrower: analysis?.loanOverview?.borrowerName || analysis?.loanOverview?.borrowerLegalName || 'N/A',
+                amount: (analysis?.loanOverview?.amount || analysis?.loanOverview?.facilityAmount?.value || '0').toString(),
+                decision: analysis?.recommendation?.decision || analysis?.creditRecommendation?.recommendation || 'unknown',
                 video_url: initialVideoUrl || null,
                 video_status: status || 'processing',
                 metrics: {
-                    ebitda: analysis?.financialAnalysis?.ebitda?.margin ? `${analysis.financialAnalysis.ebitda.margin}%` : "N/A",
-                    leverage: analysis?.financialAnalysis?.leverage?.debtToEbitda ? `${analysis.financialAnalysis.leverage.debtToEbitda}x` : "N/A",
-                    dscr: analysis?.financialAnalysis?.interestCoverage ? `${analysis.financialAnalysis.interestCoverage}x` : "N/A"
+                    ebitda: analysis?.financialHealth?.ebitdaMargin || (analysis?.financialAnalysis?.ebitda?.margin ? `${analysis.financialAnalysis.ebitda.margin}%` : "N/A"),
+                    leverage: analysis?.financialHealth?.leverage || (analysis?.financialAnalysis?.leverage?.debtToEbitda ? `${analysis.financialAnalysis.leverage.debtToEbitda}x` : "N/A"),
+                    dscr: analysis?.financialHealth?.interestCoverage || (analysis?.financialAnalysis?.interestCoverage ? `${analysis.financialAnalysis.interestCoverage}x` : "N/A")
                 }
             }]);
 

@@ -71,6 +71,8 @@ export function Dashboard() {
 
       // Step 3: Trigger real rendering
       setStep("rendering")
+      setRealtimeProgress(0)
+      setProgressLabel("Starting render...")
       
       const renderResponse = await fetch("/api/generate-video/render", {
         method: "POST",
@@ -83,32 +85,49 @@ export function Dashboard() {
       }
 
       const { videoId } = await renderResponse.json()
+      console.log(`🎬 Starting video status polling for: ${videoId}`)
 
-      // Subscribe to Supabase for progress updates
-      const { supabase } = await import("@/lib/supabase")
-      
-      supabase
-        .channel(`video-${videoId}`)
-        .on('postgres_changes', { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'videos', 
-          filter: `id=eq.${videoId}` 
-        }, (payload: any) => {
-          const { progress, progress_label, status, video_url } = payload.new
+      // Poll the unified status endpoint
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`/api/video-status?id=${videoId}`)
           
-          if (progress !== undefined) setRealtimeProgress(progress)
-          if (progress_label) setProgressLabel(progress_label)
+          if (!statusResponse.ok) {
+            console.warn(`⚠️ Status check returned ${statusResponse.status}`)
+            return
+          }
+
+          const data = await statusResponse.json()
           
-          if (status === 'completed') {
-            setVideoUrl(video_url)
+          const status = data.status
+          const videoUrl = data.videoUrl
+          const progressLabel = data.progressLabel || data.progress_label || ""
+          const progress = typeof data.progress === 'number' ? data.progress : parseInt(data.progress) || 0
+
+          // Update UI with progress
+          if (progress !== undefined && progress !== null) {
+            setRealtimeProgress(Number(progress))
+          }
+          if (progressLabel) {
+            setProgressLabel(String(progressLabel))
+          }
+
+          // Handle completion
+          if (status === 'completed' && videoUrl) {
+            clearInterval(pollInterval)
+            setVideoUrl(videoUrl)
             setStep("complete")
+            setRealtimeProgress(100)
           } else if (status === 'failed') {
+            console.error(`❌ Video generation failed`)
+            clearInterval(pollInterval)
             setError("Video rendering failed. Please try again.")
             setStep("error")
           }
-        })
-        .subscribe()
+        } catch (err) {
+          console.error("❌ Error polling status:", err)
+        }
+      }, 2000) // Poll every 2 seconds
 
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -166,6 +185,8 @@ export function Dashboard() {
               isReady={step === "complete"} 
               onReset={handleReset} 
               isProcessing={step !== "idle" && step !== "complete" && step !== "error"}
+              realtimeProgress={realtimeProgress}
+              progressLabel={progressLabel}
             />
           </div>
         </div>

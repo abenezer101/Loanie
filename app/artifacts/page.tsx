@@ -28,7 +28,17 @@ export default function ArtifactsPage() {
 
   useEffect(() => {
     fetchArtifacts()
-  }, [])
+    
+    // Poll for updates if any artifact is processing
+    const interval = setInterval(() => {
+      const hasProcessing = artifacts.some(a => a.videoStatus === 'processing');
+      if (hasProcessing || artifacts.length === 0) {
+        fetchArtifacts();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [artifacts.length]) // Only re-run if count changes, otherwise internal check handles it
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -134,12 +144,26 @@ export default function ArtifactsPage() {
                       playsInline
                     />
                   ) : (
-                    <div className="absolute inset-0 bg-secondary/30 flex items-center justify-center">
-                       <FileVideo className="w-8 h-8 text-muted-foreground/50" />
+                    <div className="absolute inset-0 bg-secondary/30 flex flex-col items-center justify-center p-6 text-center">
+                        {artifact.videoStatus && artifact.videoStatus !== 'completed' && artifact.videoStatus !== 'failed' ? (
+                            <div className="space-y-3">
+                                <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
+                                <p className="text-[10px] font-medium text-muted-foreground animate-pulse">
+                                    {artifact.videoStatus.includes('(') ? artifact.videoStatus : 'Generating loan briefing...'}
+                                </p>
+                            </div>
+                        ) : artifact.videoStatus === 'failed' ? (
+                            <div className="space-y-2">
+                                <FileVideo className="w-8 h-8 text-destructive mx-auto opacity-50" />
+                                <p className="text-[10px] font-semibold text-destructive">Generation Failed</p>
+                            </div>
+                        ) : (
+                            <FileVideo className="w-8 h-8 text-muted-foreground/50" />
+                        )}
                     </div>
                   )}
                   
-                  {!artifact.videoUrl && (
+                  {!artifact.videoUrl && artifact.videoStatus !== 'processing' && artifact.videoStatus !== 'failed' && (
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex flex-col justify-end p-3">
                         <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground shadow-lg group-hover/video:scale-110 transition-transform cursor-pointer">
@@ -165,11 +189,33 @@ export default function ArtifactsPage() {
                     <p className="text-xs font-semibold text-foreground truncate">{artifact.borrower}</p>
                   </div>
                   <div className="space-y-0.5">
-                    <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Status</p>
+                    <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Video Status</p>
                     <div className="flex items-center gap-1">
-                      <ShieldCheck className="w-2.5 h-2.5 text-primary" />
-                      <span className="text-xs font-semibold text-foreground truncate">Verified</span>
+                      <div className={`w-1.5 h-1.5 rounded-full ${
+                        artifact.videoStatus === 'completed' ? 'bg-green-500' : 
+                        artifact.videoStatus === 'failed' ? 'bg-destructive' : 
+                        'bg-amber-500 animate-pulse'
+                      }`} />
+                      <span className="text-xs font-semibold text-foreground truncate capitalize">
+                        {artifact.videoStatus || 'Unknown'}
+                      </span>
                     </div>
+                  </div>
+                </div>
+
+                {/* Metrics Breakdown */}
+                <div className="grid grid-cols-3 gap-2 px-1">
+                  <div className="flex flex-col">
+                    <span className="text-[8px] text-muted-foreground uppercase font-bold">EBITDA</span>
+                    <span className="text-[10px] font-semibold">{artifact.metrics?.ebitda || 'N/A'}</span>
+                  </div>
+                  <div className="flex flex-col border-x border-border/50 px-2">
+                    <span className="text-[8px] text-muted-foreground uppercase font-bold">Leverage</span>
+                    <span className="text-[10px] font-semibold">{artifact.metrics?.leverage || 'N/A'}</span>
+                  </div>
+                  <div className="flex flex-col pl-1">
+                    <span className="text-[8px] text-muted-foreground uppercase font-bold">DSCR</span>
+                    <span className="text-[10px] font-semibold">{artifact.metrics?.dscr || 'N/A'}</span>
                   </div>
                 </div>
 
